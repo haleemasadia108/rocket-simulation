@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Rocket Launch & Orbital Trajectory Simulator</title>
+    <!-- Tailwind CSS & Three.js -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #030712; color: white; font-family: system-ui, -apple-system, sans-serif; }
+        .glass { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col overflow-hidden">
+
+    <!-- Top Navigation Bar -->
+    <header class="glass h-14 flex items-center justify-between px-6 z-10">
+        <div class="flex items-center space-x-2">
+            <span class="text-xl">🚀</span>
+            <h1 class="font-bold text-lg bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">AeroSim 3D: Orbital Flight</h1>
+        </div>
+        <div class="flex space-x-4 text-xs font-mono text-slate-300">
+            <div>STATUS: <span id="status-badge" class="text-amber-400 font-bold">READY</span></div>
+            <div>MISSION TIME: <span id="mission-time" class="text-white font-bold">T- 00:00:00</span></div>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex relative">
+        
+        <!-- Left Sidebar: Controls -->
+        <div class="w-80 glass p-5 flex flex-col space-y-5 z-10 overflow-y-auto">
+            <h2 class="text-sm font-bold tracking-wider text-blue-400 uppercase">Flight Parameters</h2>
+            
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs"><span class="text-slate-400">Thrust Throttle</span><span id="val-throttle" class="font-mono">100%</span></div>
+                <input id="range-throttle" type="range" min="0" max="100" value="100" class="w-full accent-blue-500">
+            </div>
+
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs"><span class="text-slate-400">Launch Pitch Angle</span><span id="val-pitch" class="font-mono">90°</span></div>
+                <input id="range-pitch" type="range" min="0" max="90" value="90" class="w-full accent-blue-500">
+            </div>
+
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs"><span class="text-slate-400">Total Fuel Mass</span><span id="val-fuel" class="font-mono">1000 t</span></div>
+                <input id="range-fuel" type="range" min="200" max="2000" step="50" value="1000" class="w-full accent-blue-500">
+            </div>
+
+            <hr class="border-slate-800">
+
+            <div class="flex space-x-2">
+                <button id="btn-launch" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded transition shadow-lg shadow-emerald-900/20">LAUNCH</button>
+                <button id="btn-reset" class="bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 font-bold py-2 px-4 rounded transition">RESET</button>
+            </div>
+
+            <div class="pt-2">
+                <h3 class="text-xs font-bold tracking-wider text-blue-400 uppercase mb-2">Live Telemetry</h3>
+                <div class="space-y-2 font-mono text-xs bg-slate-950/50 p-3 rounded border border-slate-800/80">
+                    <div class="flex justify-between"><span class="text-slate-400">Altitude:</span><span id="tel-alt">0.0 km</span></div>
+                    <div class="flex justify-between"><span class="text-slate-400">Velocity:</span><span id="tel-vel">0.0 m/s</span></div>
+                    <div class="flex justify-between"><span class="text-slate-400">Acceleration:</span><span id="tel-acc">0.0 g</span></div>
+                    <div class="flex justify-between"><span class="text-slate-400">Dynamic Press:</span><span id="tel-q">0 kPa</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center 3D Viewport -->
+        <div id="canvas-container" class="flex-1 relative"></div>
+
+    </div>
+
+    <!-- Simulation Script Logic -->
+    <script>
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x030712, 0.001);
+
+        const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 10000);
+        camera.position.set(0, 50, 200);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        sunLight.position.set(200, 100, 200);
+        scene.add(sunLight);
+
+        const earthGeo = new THREE.SphereGeometry(80, 64, 64);
+        const earthMat = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.8 });
+        const earth = new THREE.Mesh(earthGeo, earthMat);
+        scene.add(earth);
+
+        const atmosGeo = new THREE.SphereGeometry(83, 64, 64);
+        const atmosMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.15, side: THREE.BackSide });
+        scene.add(new THREE.Mesh(atmosGeo, atmosMat));
+
+        const rocketGroup = new THREE.Group();
+        const bodyGeo = new THREE.CylinderGeometry(1.5, 2, 16, 16);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, metalness: 0.2, roughness: 0.3 });
+        const rocketBody = new THREE.Mesh(bodyGeo, bodyMat);
+        rocketBody.position.y = 8;
+        rocketGroup.add(rocketBody);
+
+        const coneGeo = new THREE.ConeGeometry(1.5, 5, 16);
+        const coneMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+        const cone = new THREE.Mesh(coneGeo, coneMat);
+        cone.position.y = 18.5;
+        rocketGroup.add(cone);
+
+        rocketGroup.position.set(0, 80, 0);
+        scene.add(rocketGroup);
+
+        let isLaunched = false;
+        let alt = 0, vel = 0, mass = 1000, time = 0;
+        let throttle = 1.0, pitch = 90;
+
+        document.getElementById('range-throttle').addEventListener('input', (e) => {
+            throttle = e.target.value / 100;
+            document.getElementById('val-throttle').innerText = e.target.value + '%';
+        });
+        document.getElementById('range-pitch').addEventListener('input', (e) => {
+            pitch = parseFloat(e.target.value);
+            document.getElementById('val-pitch').innerText = e.target.value + '°';
+        });
+        document.getElementById('range-fuel').addEventListener('input', (e) => {
+            mass = parseFloat(e.target.value);
+            document.getElementById('val-fuel').innerText = e.target.value + ' t';
+        });
+
+        document.getElementById('btn-launch').addEventListener('click', () => {
+            isLaunched = true;
+            document.getElementById('status-badge').innerText = 'IN FLIGHT';
+            document.getElementById('status-badge').className = 'text-emerald-400 font-bold';
+        });
+
+        document.getElementById('btn-reset').addEventListener('click', () => {
+            isLaunched = false;
+            alt = 0; vel = 0; time = 0;
+            rocketGroup.position.set(0, 80, 0);
+            rocketGroup.rotation.set(0, 0, 0);
+            document.getElementById('status-badge').innerText = 'READY';
+            document.getElementById('status-badge').className = 'text-amber-400 font-bold';
+            document.getElementById('mission-time').innerText = 'T- 00:00:00';
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isLaunched && mass > 50) {
+                time += 0.05;
+                let thrust = throttle * 45;
+                let gravity = 9.81 * (80 / (80 + alt/10));
+                let accel = (thrust / (mass / 50)) - gravity;
+                
+                vel += accel * 0.05;
+                alt += vel * 0.05;
+                mass -= throttle * 0.5;
+
+                let radPitch = (pitch * Math.PI) / 180;
+                let displacement = vel * 0.02;
+                rocketGroup.position.y += Math.sin(radPitch) * displacement;
+                rocketGroup.position.x += Math.cos(radPitch) * displacement * 0.5;
+
+                camera.position.y = rocketGroup.position.y + 20;
+                camera.lookAt(rocketGroup.position);
+
+                document.getElementById('tel-alt').innerText = alt.toFixed(1) + ' km';
+                document.getElementById('tel-vel').innerText = vel.toFixed(1) + ' m/s';
+                document.getElementById('tel-acc').innerText = (accel / 9.81).toFixed(2) + ' g';
+                document.getElementById('tel-q').innerText = Math.round(vel * vel * 0.001) + ' kPa';
+                
+                let mins = Math.floor(time / 60).toString().padStart(2, '0');
+                let secs = Math.floor(time % 60).toString().padStart(2, '0');
+                document.getElementById('mission-time').innerText = `T+ 00:${mins}:${secs}`;
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+    </script>
+</body>
+</html>
